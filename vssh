@@ -1,0 +1,630 @@
+#!/bin/bash
+#
+# Copyright (C) 2017 by John Fischer, All Rights Reserved.
+#
+# Allows easy start/stop/access to various VBOX virtual machine guests.
+# If the script name is vssh then the usage is:
+#
+#	$ vssh vm-name [start|stop|ssh|sftp|list|help]
+#
+# If the script name is not vssh but matches a vm-name then the usage is:
+#
+#	$ vm-name [start|stop|ssh|sftp|list|help]
+#
+# N.B. ssh -f starts an ssh session which will allow remote displaying of
+# X11 application if X11 is installed on the virtual machine.
+#
+# The user name and port should be stored in a comma separated file named
+# $HOME/.vssh.csv with the columns being:
+#
+# 	vm-name,user,local-ssh-port,reserved(& optional)
+#
+# See http://www.virtualbox.org/manual/ch06.html#natforward for information
+# about how to setup port forwarding to the virtual machine.  The port and
+# user name can be supplied on the command line for the ssh and sftp options
+# thus making the CSV file optional.
+#
+# N.B. vm-name should not include any spaces
+#
+
+# Globals
+export SCRIPT=$(basename $0)
+export VSSH="vssh"
+export VM=""
+export CSV="$HOME/.vssh.csv"
+export VM_USER=$USER
+
+# Used command
+export VBOXMG=/usr/bin/vboxmanage
+export SSH=/usr/bin/ssh
+export SFTP=/usr/bin/sftp
+export CUT=/usr/bin/cut
+export GREP=/bin/grep
+
+
+# 
+# Find the valid VMs for this host
+#
+function validVMS {
+	# get the valid virtual machines
+	$VBOXMG list vms | $CUT -d'"' -f2 | sort
+}
+
+# 
+# Find if the VM is valid
+#
+#   Arguments:	$1 - vm-name
+#
+#   Returns 0 for valid VM
+# 
+function validVM {
+	# check if the virtual machine is valid
+	validVMS | $GREP $1 > /dev/null 2>&1
+}
+
+# 
+# Find if the VM is running
+#
+#   Arguments:	$1 - vm-name
+#
+#   Outputs: "yes" if the VM is running OR "no" if the VM is not running
+# 
+function isRunning {
+	# check if the virtual machine is running
+	if $VBOXMG list runningvms | $GREP "$1" > /dev/null ; then
+		echo "yes"
+	else
+		echo "no"
+	fi
+}
+
+#
+# Get the virtual machine name
+#
+# Arguments: $1 - the first argument for the script
+#
+# Returns: 1 if the first argument is indeed the virtual machine name
+#          0 otherwise
+#
+function vmName {
+	VNAME=""
+	RTN_CODE=0
+	if [[ $SCRIPT == $VSSH ]] ; then
+		# ensure that the first argument is not list or help
+		if ! [[ "$1" =~ ^(list|help|-h)$ ]] ; then
+			# the virtual machine name is the first argument
+			VNAME=$1
+			RTN_CODE=0
+		fi
+	else
+		# the virtual machine name is the same as the script name
+		VNAME=$SCRIPT
+	fi
+
+	# validate the requested VM
+	if [[ "X$VNAME" != "X" ]] && ! validVM "$VNAME" ; then
+		echo "VM ($VNAME) not found" >&2
+		RTN_CODE=1
+	fi
+
+	echo $VNAME
+	return $RTN_CODE
+}
+
+#
+# Parse the command line options for the subcommand
+#
+#   Arguments: $1 - command line options to be checked
+#	       $* - actual command line options
+#
+#   Outputs: Various command line options
+#
+#   Returns: 1 on error
+#
+function parseOptions {
+	# default values
+	EXTRAS=""
+	SILENCED=""
+	VERBOSE=""
+	HEADLESS=""
+	VM_PORT=$VM_PORT
+
+	# get the command line options for the subcommand
+	OPTS=$1 && shift  # move past the command line options
+
+	# check if the command line options includes the windowing option
+	if echo "$OPTS" | $GREP "w" > /dev/null ; then
+		# it includes the possibility, in that case the default option
+		# is to run headless
+		HEADLESS="--type headless"
+	fi
+
+	# validate the options list
+	if [[ "X$OPTS" == "X" ]] && [[ $# != 0 ]] ; then
+		echo "Invalid option(s): $*" >&2
+		return 1
+	fi
+
+	ERROR=0
+	COUNTER=0  # counts the processed options
+	# parse the options supplied
+	while getopts "$OPTS" opt ; do
+		case $opt in
+		  f)	EXTRA="$EXTRA -X"
+			(( COUNTER = $COUNTER + 1 ))
+			;;
+		  d)	SILENCED="-o UserKnownHostsFile=/dev/null"
+			SILENCED="$SILENCED -o StrictHostKeyChecking=no"
+			(( COUNTER = $COUNTER + 1 ))
+			;;
+		  e)	SILENCED=""
+			(( COUNTER = $COUNTER + 1 ))
+			;;
+		  u)	VM_USER=$OPTARG
+			(( COUNTER = $COUNTER + 2 ))
+			;;
+		  p)    VM_PORT=$OPTARG
+			(( COUNTER = $COUNTER + 2 ))
+			;;
+		  v)	VERBOSE=1
+			(( COUNTER = $COUNTER + 1 ))
+		  	;;
+		  w)	HEADLESS=""
+			(( COUNTER = $COUNTER + 1 ))
+			;;
+		  h)	echo "HELP"
+			return 1
+			;;
+                  *)	ERROR=1
+			(( COUNTER = $COUNTER + 1 ))
+			;;
+		esac
+	done
+
+	# ensure that nothing extra was present
+	if [[ $# != $COUNTER ]] ; then
+		echo "Error:Extra argument(s) on command line" >&2
+		return 1
+	fi
+	# ensure that there weren't any invalid options
+	[[ $ERROR == 1 ]] && return 1
+
+	# inform of the found command line options
+	# check if the command line options includes the user option
+	if echo "$OPTS" | $GREP "u:" > /dev/null ; then
+		echo "$VM_USER" "$VM_PORT" $EXTRA $SILENCED $VERBOSE $HEADLESS
+	else
+		echo $EXTRA $SILENCED $VERBOSE $HEADLESS
+	fi
+}
+
+#
+# check the command line options for the port
+#
+# Arguments: $* - command line arguments
+#
+# Returns: 1 if the port option is not found
+#	   0 when it is found
+#
+function checkPort {
+	FOUND_PORT=""
+	while getopts "u:p:edh" opt ; do
+		case $opt in 
+			p)	FOUND_PORT=$OPTARG
+				;;
+			*)	;;
+		esac
+	done
+	# ensure that the real CLI parser works correctly
+	OPTIND=1
+
+	if [[ $FOUND_PORT == "" ]] ; then
+		return 1
+	fi
+	return 0
+}
+
+
+#
+# Print usage
+#
+function usage {
+	if [[ "$SCRIPT" == "vssh" ]] ;
+	then
+		# figure out if the virtual machine name is known
+		if [[ "X$VM" == "X" ]] ; then
+			# it is not known, use a generic name
+			export VNAME=" vm-name"
+		else
+			# it is known, use it
+			export VNAME=" $VM"
+		fi
+	fi
+	echo "Usage: $SCRIPT$VNAME [-h] [start|stop|ssh|sftp|list|help]"
+}
+
+#
+# Print help 
+#
+# Arguments: $1 - print help for a specific command, optional
+#
+function doHelp {
+	COMMANDS="-h start stop ssh sftp list help"
+	# check if producing help for a single command
+	if [[ $# != 0 ]] ; then
+		COMMANDS=$1
+	fi
+
+	# output the help message(s)
+	echo "Where:"
+	for word in $COMMANDS; do
+	  case $word in
+	    start) printf "\tstart [-w|-h] - start the guest\n"
+		   printf "\t\t-w start the guest in a window\n"
+		   printf "\t\t-h print the help for the subcommand\n"
+		   ;;
+	    stop)  printf "\tstop [-h] - stops the virtual machine\n"
+		   printf "\t\t-h print the help for the subcommand\n"
+		   ;;
+	    ssh)   printf "\tssh [-e|-d|-u <user>|-p <port>|-f|-h] - "
+		   printf "ssh into the virtual machine\n"
+		   printf "\t\t-e enables known_host updates\n"
+		   printf "\t\t-d disables known_host updates\n"
+		   printf "\t\t-u user name\n"
+		   printf "\t\t-p port number\n"
+		   printf "\t\t-f allow X11 forwarding\n"
+		   printf "\t\t-h print the help for the subcommand\n"
+		   ;;
+	    sftp)  printf "\tsftp [-e|-d|-u <user>|-p <port>|-s|-h] - "
+		   printf "sftp into the virtual machine\n"
+		   printf "\t\t-e enables known_host updates\n"
+		   printf "\t\t-d disables known_host updates\n"
+		   printf "\t\t-u user name\n"
+		   printf  "\t\t-p port number\n"
+		   printf "\t\t-h print the help for the subcommand\n"
+		   ;;
+	    list)  printf "\tlist [-v|-h] - list the state of the virtual "
+		   printf "machine\n"
+		   printf "\t\t-v list all the virtual machines\n"
+		   printf "\t\t-h print the help for the subcommand\n"
+		   ;;
+	     \-h)  printf "\t-h print this message\n"
+		   ;;
+	     help) printf "\thelp - print this message\n"
+		   ;;
+	     *)    printf "Unknown subcommand ($word)\n."
+		   ;;
+	  esac
+	  # if displaying help for multiple subcommands add a blank in between
+          # the subcommands help text, 5 is the length of the longest subcommand
+	  [[ ${#COMMANDS} -gt 5 ]] && echo
+	done
+}
+
+#
+# Figure out what the current user/port is for the requested virtual machine
+# from the $HOME/.vbox.csv file.
+#
+# Arguments: $1 - the requested virtual machine
+#
+# Outputs: user port silence-option if VM found
+#
+# Returns: 1 on error if CSV file does not exist OR VM not found
+# 	   0 otherwise
+#
+function parseCSV {
+	# ensure that the csv file exists
+	if [[ ! -e $CSV ]] ; then
+		echo "Warning:$CSV not present" >&2
+		return 1
+	fi
+
+	# ensure that the virtual machine name was supplied
+	VM=$1
+	if [[ "X$VM" == "X" ]] ; then
+		return 0
+	fi
+
+	# parse the CSV file looking for the virtual machine entry
+	while IFS=, read OP USER PORT SILENCED
+	do
+		if [[ "$OP" == "$VM" ]] ; then
+			# virtual machine found
+			# check if known_hosts should be updated
+			if [[ "$SILENCED" == "disabled" ]] ; then
+				SILENCED_OPT="-d"
+			else
+				SILENCED_OPT="-e"
+			fi
+			# return the information found
+			echo "$USER $PORT $SILENCED_OPT"
+			return 0
+		fi
+	done < $CSV
+
+	# virtual machine not found, error out
+	echo "$VM not found in CSV file ($CSV)" >&2
+	return 1
+}
+
+#
+# List the VMS
+#
+# Arguments: $* - subcommand options
+#
+# Returns: 1 if there is an invalid option or there is an invalid option
+# 	   0 otherwise
+#
+function doList {
+	# parse the subcommand options
+	if ! COMMAND_OPTIONS=$(parseOptions "vh" $*) ; then
+		# print the usage and help for the subcommand
+		usage
+		doHelp "list"
+		# if help wasn't requested error out
+		if [[ $COMMAND_OPTIONS != "HELP" ]] ; then
+			return 1
+		fi
+		return 0
+	fi
+
+	# figure out what to output
+	DO_VM=true
+	DO_VERBOSE=false
+	# if the VM is not valid then print the known VMs and not the specific VM
+	if [[ "X$VM" == "X" ]] || ! validVM $VM ; then
+		DO_VM=false
+		DO_VERBOSE=true
+	fi
+
+	# if command verbose was requested then COMMAND_OPTIONS will equal 1
+	if [[ $COMMAND_OPTIONS == "1" ]] ; then
+		DO_VERBOSE=true
+	fi
+
+	# print out the state of the virtual machine if possible
+	if [[ $DO_VM == true ]] ; then
+		# check if the virtual machine is running
+		if [[ $(isRunning $VM) == "yes" ]] ; then
+			echo "$VM is currently running."
+		else
+			echo "$VM is not currently running."
+		fi
+	fi
+
+	# print out all the virtual machines available
+	if [[ $DO_VERBOSE == true ]] ; then
+		CURRENTLY_RUNNING=0
+		echo "Available VMs are:"
+		for vm in $(validVMS); do
+			# check if the current virtual machine is running
+			if [[ $(isRunning $vm) == "yes" ]] ; then
+				printf "\t%s*\n" $vm
+				CURRENTLY_RUNNING=1
+			else
+				printf "\t%s\n" $vm
+			fi
+		done
+		# if one of the virtual machines are running then print a
+		# message indicating what the asterisk means.
+		if [[ $CURRENTLY_RUNNING == 1 ]] ; then
+			echo "* - currently running VM(s)."
+		fi
+	fi
+}
+
+#
+# start the virtual machine
+#
+# Argument $1 - flag indicating if virtual machine is running
+# 	   $* - subcommand options
+#
+# Returns: 1 if there is an invalid option or there is an invalid option
+# 	   0 otherwise
+#
+function doStart {
+	# save the first argument for later use
+	check=$1 && shift # skip past the check
+
+	# parse the subcommand options
+	if ! COMMAND_OPTIONS=$(parseOptions "wh" $*) ; then
+		# print the usage and help for the subcommand
+		usage
+		doHelp "start"
+		# if help wasn't requested error out
+		if [[ $COMMAND_OPTIONS != "HELP" ]] ; then
+			return 1
+		fi
+		return 0
+	fi
+
+	# ensure that the virtual machine isn't running already
+	if [[ $check == "yes" ]] ; then
+		echo "$VM is already running."	
+		return
+	fi
+
+	# start the virtual machine
+	$VBOXMG startvm $VM $COMMAND_OPTIONS
+	return $?
+}
+
+#
+# stop the virtual machine
+#
+# Argument $1 - flag indicating if virtual machine is running
+#
+# Returns: 1 if the VM is not running or there is an invalid option
+# 	   0 otherwise
+#
+function doStop {
+	# save the first argument for later use
+	check=$1 && shift # skip past the check
+
+	# parse the subcommand options
+	if ! COMMAND_OPTIONS=$(parseOptions "h" $*) ; then
+		# print the usage and help for the subcommand
+		usage
+		doHelp "stop"
+		# if help wasn't requested error out
+		if [[ $COMMAND_OPTIONS != "HELP" ]] ; then
+			return 1
+		fi
+		return 0
+	fi
+
+	# ensure that the virtual machine is running
+	if [[ $check == "no" ]] ; then
+		echo "Error: $VM is not running." >&2
+		return 1
+	fi
+
+	# stop the virtual machine
+	$VBOXMG controlvm $VM poweroff
+	return $?
+}
+
+#
+# ssh into the virtual machine
+#
+# Arguments $1 - flag indicating if virtual machine is running
+# 	    $* - subcommand options
+#
+# Returns: 1 if the VM is not running or there is an invalid option
+# 	   0 otherwise
+#
+function doSSH {
+	# save the first argument for later use
+	check=$1 && shift # skip past the check
+
+	# parse the subcommand options
+	if ! COMMAND_OPTIONS=$(parseOptions "u:p:edfh" $*) ; then
+		# print the usage and help for the subcommand
+		usage
+		doHelp "ssh"
+		# if help wasn't requested error out
+		if [[ $COMMAND_OPTIONS != "HELP" ]] ; then
+			return 1
+		fi
+		return 0
+	fi
+
+	# get the user, port and options
+	VM_USER=$(echo $COMMAND_OPTIONS | cut -d' ' -f1)
+	VM_PORT=$(echo $COMMAND_OPTIONS | cut -d' ' -f2)
+	COMMAND_OPTIONS=$(echo $COMMAND_OPTIONS | cut -d' ' -f3-)
+
+	# ensure that the virtual machine is running
+	if [[ $check == "no" ]] ; then
+		echo "Error: $VM is not running." >&2
+		return 1
+	fi
+
+	# secure shell into the virtual machine
+	$SSH $COMMAND_OPTIONS -p $VM_PORT $VM_USER@localhost
+	rtn=$?
+	if [[ $rtn != 0 ]] ; then
+		echo "Error:Unable to connect to the virtual machine"
+	fi
+	return $rtn
+}
+
+#
+# sftp into the virtual machine
+#
+# Argument $1 - flag indicating if virtual machine is running
+# 	   $* - subcommand options
+#
+# Returns: 1 if the VM is not running or there is an invalid option
+# 	   0 otherwise
+#
+function doSFTP {
+	# save the first argument for later use
+	check=$1 && shift # skip past the check
+
+	# parse the subcommand options
+	if ! COMMAND_OPTIONS=$(parseOptions "u:p:edh" $*) ; then
+		# print the usage and help for the subcommand
+		usage
+		doHelp "sftp"
+		# if help wasn't requested error out
+		if [[ $COMMAND_OPTIONS != "HELP" ]] ; then
+			return 1
+		fi
+		return 0
+	fi
+
+	# get the user, port and options
+	VM_USER=$(echo $COMMAND_OPTIONS | cut -d' ' -f1)
+	VM_PORT=$(echo $COMMAND_OPTIONS | cut -d' ' -f2)
+	COMMAND_OPTIONS=$(echo $COMMAND_OPTIONS | cut -d' ' -f3-)
+
+	# ensure that the virtual machine is running
+	if [[ $check == "no" ]] ; then
+		echo "Error: $VM is not running." >&2
+		return 1
+	fi
+
+	# secure ftp into the virtual machine
+	$SFTP $COMMAND_OPTIONS -P $VM_PORT $VM_USER@localhost
+	rtn=$?
+	if [[ $rtn != 0 ]] ; then
+		echo "Error:Unable to connect to the virtual machine"
+	fi
+	return $rtn
+}
+
+#
+# Main part of the script
+#
+
+# get the virtual machine name
+VM=$(vmName $*) || exit 1
+[[ $SCRIPT == $VSSH ]] && ! [[ $1 =~ ^(list|help|-h)$ ]] && shift
+
+export SUBCOMMAND=$1  && shift  # move past the subcommand
+# validate the subcommand
+if ! [[ "$SUBCOMMAND" =~ ^(start|stop|ssh|sftp|list|help|-h)$ ]]; then
+	if [[ "X$SUBCOMMAND" == "X" ]] ; then
+		echo "Error:Subcommand required" >&2
+	else
+		echo "Error:Invalid subcommand ($SUBCOMMAND)" >&2
+	fi
+	usage
+	exit 1
+fi
+
+# get the CSV data if the subcommand is ssh or sftp
+if [[ "$SUBCOMMAND" =~ ^(ssh|sftp)$ ]] ; then
+	# parse the CSV file
+	CSVOutput=$(parseCSV $VM)
+	# validate the CSV return for ssh and sftp only
+	if [[ $? != 0 ]] ; then
+		if ! checkPort $* ; then
+			echo "Error:Unable to determine the port for the virtual machine"
+			exit 1
+		fi
+	else
+		read VM_USER VM_PORT SILENCER <<< $(echo $CSVOutput)
+	fi
+fi
+
+# execute the appropriate subcommand
+case $SUBCOMMAND in 
+  start)	doStart $(isRunning $VM) $*
+		;;
+  stop)		doStop $(isRunning $VM) $*
+		;;
+  ssh)		doSSH $(isRunning $VM) $SILENCER $*
+		;;
+  sftp)		doSFTP $(isRunning $VM) $SILENCER $*
+		;;
+  list)		doList $*
+		;;
+  \-h|help)	usage && doHelp
+		;;
+  \?)		usage  # an error has occurred in validation of the subcommand
+		exit 1
+		;;
+esac
+exit $?
