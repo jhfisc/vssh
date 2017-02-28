@@ -1,0 +1,365 @@
+.\" Copyright (c) 2017, John Fischer. All rights reserved.
+
+.TH VSSH 1 "19 January 2017"
+
+.SH NAME
+vssh \- virtual machine secure shell utility
+.SH SYNOPSIS
+.nf
+\fBvssh\fR [\fB\-h\fR] vm-name [\fIsubcommand\fR]
+.fi
+
+.PP
+.nf
+\fBvssh\fR vm-name \fBstart\fR [\fB-w\fR|\fB-h\fR]
+.fi
+.nf
+.PP
+.nf
+\fBvssh\fR vm-name \fBstop\fR [\fB-h\fR]
+.fi
+.nf
+.PP
+.nf
+\fBvssh\fR vm-name \fBssh\fR [\fB-e\fR|\fB-d\fR|\fB-u\fR\ <user>|\fB-p\fR\ <port>|\fB-f\fR|\fB-h\fR]
+.fi
+.nf
+.PP
+.nf
+\fBvssh\fR vm-name \fBsftp\fR [\fB-e\fR|\fB-d\fR|\fB-u\fR\ <user>|\fB-p\fR\ <port>|\fB-h\fR]
+.fi
+.nf
+.PP
+.nf
+\fBvssh\fR vm-name \fBlist\fR [\fB-v\fR|\fB-h\fR]
+\fBvssh\fR \fBlist\fR [\fB-v\fR|\fB-h\fR]
+.fi
+.nf
+.PP
+.nf
+\fBvssh\fR \fBhelp\fR
+.fi
+.nf
+.PP
+.SH DESCRIPTION
+.I vssh
+is a utility for starting, stopping, listing and accessing a virtual machine on a host.
+.PP
+\fB-h\fR
+.RS 4n
+Print the help message for the command.
+.RE
+.PP
+If a symbolic link is created that points to the vssh utility and is named the same as the virtual machine then the virtual machince can be manipulated by using the virtual machine name and a subcommand.  For example, if the virtual machine is named \fIubuntu\fR then the symbolic link would be named \fIubuntu\fR and the virtual machine can be started by using \fBubuntu start\fR:
+.PP
+.RS 4n
+.nf
+$ ln -s vssh ubuntu
+$ ubuntu start
+Waiting for VM "ubuntu" to power on...
+VM "ubuntu" has been successfully started.
+.fi
+.RE
+.PP
+Any of the subcommands could also be used in a similar manner.
+.SH SUB-COMMANDS
+.sp
+.LP
+The \fIvssh\fR command has the subcommands listed below.
+.sp
+.ne 2
+.ml
+.nf
+\fBvssh\fR vm-name \fBstart\fR [\fB-w\fR|\fB-h\fR]
+.fi
+.PP
+.RS 4n
+This subcommand starts the guest virtual machine named by \fIvm-name\fR.
+.PP
+\fB-w\fR
+.RS 4n
+start the guest within a window.
+.RE
+.PP
+\fB-h\fR
+.RS 4n
+display the help message for the \fBstart\fR subcommand.
+.RE
+.RE
+.sp
+.ne 2
+.ml
+.nf
+\fBvssh\fR vm-name \fBstop\fR [\fB-h\fR]
+.fi
+.PP
+.RS 4n
+This subcommand stops the guest virtual machine named by \fIvm-name\fR.
+.PP
+\fB-h\fR
+.RS 4n
+display the help message for the \fBstop\fR subcommand.
+.RE
+.RE
+.sp
+.ne 2
+.ml
+.nf
+\fBvssh\fR vm-name \fBssh\fR [\fB-e\fR|\fB-d\fR|\fB-u\fR\ <user>|\fB-p\fR\ <port>|\fB-f\fR|\fB-h\fR]
+.fi
+.PP
+.RS 4n
+This subcommand starts a secure shell into the guest virtual machine named by \fIvm-name\fR. For this subcommand to work port forwarding with NAT must be configured for the guest virtual machine. 
+.PP
+\fB-e\fR
+.RS 4n
+enable the recording of host information into the host user's \fI$HOME/.ssh/known_hosts\fR file.
+.RE
+.PP
+\fB-d\fR
+.RS 4n
+disable the recording of host information into the host user's \fI$HOME/.ssh/known_hosts\fR file.
+.RE
+.PP
+\fB-u\fR <user>
+.RS 4n
+specifies the \fIuser\fR name to be used when secure shelling into the virtual machine. 
+.RE
+.PP
+\fB-p\fR <port>
+.RS 4n
+specifies the \fIport\fR number to be used when secure shelling into the virtual machine.
+.RE
+.PP
+\fB-f\fR
+.RS 4n
+enable X11 forwarding from the virtual machine.
+.RE
+.PP
+\fB-h\fR
+.RS 4n
+display the help message for the \fBssh\fR subcommand.
+.RE
+.RE
+.sp
+.ne 2
+.ml
+.nf
+\fBvsftp\fR vm-name \fBssh\fR [\fB-e\fR|\fB-d\fR|\fB-u\fR\ <user>|\fB-p\fR\ <port>|\fB-h\fR]
+.fi
+.PP
+.RS 4n
+This subcommand starts a secure ftp into the guest virtual machine named by \fIvm-name\fR. For this subcommand to work port forwarding with NAT must be configured for the guest virtual machine.
+.PP
+\fB-e\fR
+.RS 4n
+enable the recording of host information into the host user's \fI$HOME/.ssh/known_hosts\fR file.
+.RE
+.PP
+\fB-d\fR
+.RS 4n
+disable the recording of host information into the host user's \fI$HOME/.ssh/known_hosts\fR file.
+.RE
+.PP
+\fB-u\fR <user>
+.RS 4n
+specifies the \fIuser\fR name to be used when secure shelling into the virtual machine. 
+.RE
+.PP
+\fB-p\fR <port>
+.RS 4n
+specifies the \fIport\fR number to be used when secure shelling into the virtual machine.
+.RE
+.PP
+\fB-h\fR
+.RS 4n
+display the help message for the \fBssh\fR subcommand.
+.RE
+.RE
+.sp
+.ne 2
+.ml
+.nf
+\fBvssh\fR vm-name \fBlist\fR [\fB-v\fR|\fB-h\fR]
+\fBvssh\fR \fBlist\fR [\fB-v\fR|\fB-h\fR]
+.fi
+.PP
+.RS 4n
+This subcommand reports the state of the virtual machine named by \fIvm-name\fR.  When the virtual machine name is omitted it lists all the guest virtual machines on the host.
+.PP
+\fB-v\fR
+.RS 4n
+when \fIvm-name\fR is specified list all the virtual machinces on the host.
+.RE
+.PP
+\fB-h\fR
+.RS 4n
+display the help message for the \fBssh\fR subcommand.
+.RE
+.RE
+.sp
+.ne 2
+.ml
+.nf
+\fBvssh\fR \fBhelp\fR
+.fi
+.PP
+.RS 4n
+This subcommand will display context help for the vssh command.
+.RE
+.SH FILES
+\fI~/.vssh.csv\fR
+.PP
+.RS 4n
+This file is used to associate the user and port with the virtual machine. Setting up this file is equivelant to using the \fB-u\fR and \fB-p\fR options for the \fBssh\fR and \fBsftp\fR subcommands. The file format is:
+.PP
+.RS 4n
+vm-name,user,port
+.RE
+.PP
+Where \fIvm-name\fR is the name of the virtual machine, \fIuser\fR is the default user for the virtual machine and \fIport\fR is the configured forwarding port that is being used for the virtual machine. In the \fBEXAMPLES\fR below the CSV file contains:
+.PP
+.RS 4n
+.nf
+ubuntu,joey,3022
+centos7,joe,3023
+.fi
+.RE
+.LP
+which indicates that the first virtual machine is named \fIubuntu\fR, the user is \fIjoey\fR and the configured forwarding port number is \fI3022\fR.  The second virtual machine is named \fIcentos7\fR, the user is \fIjoe\fR and the configured forwarding port number is \fI3023\fR. These settings can be overwritten by the \fB-u\fR and \fB-p\fR options for the \fBssh\fR and \fBsftp\fR subcommmands.
+.PP
+.RE
+.SH EXAMPLES
+.LP
+.sp
+.PP
+\fBExample 1\fR Listing the virtual machines on a host:
+.sp
+.in +4
+.nf
+$ \fBvssh list\fR
+Available VMs are:
+	centos7
+	solaris11
+	ubuntu
+.PP
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 2\fR Listing the status of a specific virtual machine
+.sp
+.in +4
+.nf
+$ \fBvssh solaris11 list\fR
+solaris11 is currently running.
+$ \fBvssh ubuntu list\fR
+ubuntu is not currently running.
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 3\fR Verbose listing the status of a specific virtual machine
+.sp
+.in +4
+.nf
+$ \fBvssh solaris11 list\fR
+solaris11 is currently running.
+Available VMs are:
+	centos7
+	solaris11*
+	ubuntu
+* - currently running VM(s).
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 4\fR Starting a virtual machine
+.sp
+.in +4
+.nf
+$ \fBvssh ubuntu start\fR
+Waiting for VM "ubuntu" to power on...
+VM "ubuntu" has been successfully started.
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 5\fR Starting a virtual machine within a window
+.sp
+.in +4
+.nf
+$ \fBvssh ubuntu start -w\fR
+Waiting for VM "ubuntu" to power on...
+VM "ubuntu" has been successfully started.
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 6\fR Stopping a virtual machine
+.sp
+.in +4
+.nf
+$ \fBvssh ubuntu stop\fR
+0%...10%...20%...30%...40%...50%...60%...70%...80%...90%...100%
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 7\fR Secure shelling specifying the port and user
+.sp
+.in +4
+.nf
+$ \fBvssh ubuntu ssh -p 3022 -u joey\fR
+joey@localhost's password: 
+Welcome to Ubuntu 16.04.1 LTS (GNU/Linux 4.4.0-59-generic x86_64)
+\|.\|.\|.
+joey@ubuntu:~$ 
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 8\fR Secure shelling using the CSV file
+.sp
+.in +4
+.nf
+$ \fBvssh ubuntu ssh\fR
+joey@localhost's password: 
+Welcome to Ubuntu 16.04.1 LTS (GNU/Linux 4.4.0-59-generic x86_64)
+\|.\|.\|.
+joey@ubuntu:~$ 
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 9\fR Secure ftping using the CSV file
+.sp
+.in +4
+.nf
+# \fBvssh ubuntu sftp\fR
+joey@localhost's password: 
+Connected to localhost.
+sftp> 
+.fi
+.in -4
+.PP
+
+.SH SEE ALSO
+.sp
+.LP
+\fBssh\fR(1), \fBsftp\fR(1), \fBvboxmanage\fR(1), \fBVirtualBox\fR(1)
+.PP
+.nf
+VirtualBox Port forwarding with NAT
+\fBhttp://www.virtualbox.org/manual/ch06.html#natforward\fR
+
+.SH AUTHOR
+John Fischer
