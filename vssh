@@ -578,6 +578,12 @@ function doSFTP {
 # Main part of the script
 #
 
+# ensure that VirtualBox is installed
+if [[ ! -e $VBOXMG ]] ; then
+	echo "Error:VirutalBox is not installed"
+	exit 1
+fi
+
 # get the virtual machine name
 VM=$(vmName $*) || exit 1
 [[ $SCRIPT == $VSSH ]] && ! [[ $1 =~ ^(list|help|-h)$ ]] && shift
