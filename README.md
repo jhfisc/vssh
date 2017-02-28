@@ -1,2 +1,2 @@
 # vssh
-Bash wrapper for VBox start/stop/ssh guest
+Utility for VBox start/stop/list/ssh guest.
