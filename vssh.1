@@ -6,6 +6,11 @@
 vssh \- virtual machine secure shell utility
 .SH SYNOPSIS
 .nf
+\fBvssh\fR [\fB\-h\fR] vm-name
+.fi
+
+.PP
+.nf
 \fBvssh\fR [\fB\-h\fR] vm-name [\fIsubcommand\fR]
 .fi
 
@@ -105,6 +110,7 @@ display the help message for the \fBstop\fR subcommand.
 .ne 2
 .ml
 .nf
+\fBvssh\fR vm-name [\fB-e\fR|\fB-d\fR|\fB-u\fR\ <user>|\fB-p\fR\ <port>|\fB-f\fR|\fB-h\fR]
 \fBvssh\fR vm-name \fBssh\fR [\fB-e\fR|\fB-d\fR|\fB-u\fR\ <user>|\fB-p\fR\ <port>|\fB-f\fR|\fB-h\fR]
 .fi
 .PP
@@ -340,7 +346,21 @@ joey@ubuntu:~$
 .LP
 .sp
 .PP
-\fBExample 9\fR Secure ftping using the CSV file
+\fBExample 9\fR Secure shelling using the CSV file without a subcommand
+.sp
+.in +4
+.nf
+$ \fBvssh ubuntu\fR
+joey@localhost's password: 
+Welcome to Ubuntu 16.04.1 LTS (GNU/Linux 4.4.0-59-generic x86_64)
+\|.\|.\|.
+joey@ubuntu:~$ 
+.fi
+.in -4
+.LP
+.sp
+.PP
+\fBExample 10\fR Secure ftping using the CSV file
 .sp
 .in +4
 .nf

@@ -588,16 +588,26 @@ fi
 VM=$(vmName $*) || exit 1
 [[ $SCRIPT == $VSSH ]] && ! [[ $1 =~ ^(list|help|-h)$ ]] && shift
 
-export SUBCOMMAND=$1  && shift  # move past the subcommand
+export SUBCOMMAND=$1
 # validate the subcommand
 if ! [[ "$SUBCOMMAND" =~ ^(start|stop|ssh|sftp|list|help|-h)$ ]]; then
+	# if the subcommand is blank then secure shell into the VM
 	if [[ "X$SUBCOMMAND" == "X" ]] ; then
-		echo "Error:Subcommand required" >&2
+		echo "secure shell into $VM"
+		export SUBCOMMAND="ssh"
 	else
-		echo "Error:Invalid subcommand ($SUBCOMMAND)" >&2
+		# check if the subcommmand is actually an option
+		if [[ ! "$SUBCOMMAND" =~ ^-* ]] ; then
+			echo "Error:Invalid subcommand ($SUBCOMMAND)" >&2
+			usage
+			exit 1
+		else
+			echo "secure shell into $VM"
+			export SUBCOMMAND="ssh"
+		fi
 	fi
-	usage
-	exit 1
+else
+	shift  # move past the subcommand
 fi
 
 # get the CSV data if the subcommand is ssh or sftp
