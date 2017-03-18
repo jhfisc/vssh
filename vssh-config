@@ -1,0 +1,581 @@
+#!/usr/bin/python3
+
+'''
+vssh csv configuration utility
+'''
+import argparse
+import csv
+import os
+import sys
+
+from collections import namedtuple
+from subprocess import Popen, PIPE
+from tkinter import BooleanVar, BOTH, BOTTOM, Button, Checkbutton, DISABLED, \
+    END, Entry, Frame, Label, LEFT, mainloop, NORMAL, PhotoImage, \
+    Radiobutton, StringVar, SUNKEN, Tk, TOP, W, HORIZONTAL
+from tkinter.ttk import Separator
+from tkinter.messagebox import askyesnocancel, showinfo
+
+
+# globals
+VSSH = namedtuple("VSSH", "host, user, port, other")
+VBOXMG = "/usr/bin/vboxmanage"
+
+
+class Wizard(dict):
+    '''class for creating the user interface
+    Args:
+        guests - the guests already created
+        csv_file - location of the vssh csv file
+        verbose - verbose output File handle
+    '''
+    def __init__(self, guests, csv_file, verbose):
+        super(Wizard, self).__init__()
+        self.guests = guests
+        self.csv_file = csv_file
+        self.verbose = verbose
+
+        self.csv_dict = get_vssh(self.csv_file, self.guests, self.verbose)
+
+        self['var'] = None
+        self['current'] = None
+        self['pages'] = list()
+        self['root'] = None
+        self['prev'] = None
+        self['next'] = None
+        self['confirmed'] = None
+        self['cancel'] = None
+
+        self['info_title'] = None
+        self['info'] = dict()
+        self['confirm_grid'] = dict()
+
+        self.build_wizard()
+
+    def build_wizard(self):
+        '''build the wizard gui for the utility
+        Args:
+            guests - list of guests
+            cvs_file - location of CVS file
+            verbose - flag to indicate verbose output
+        '''
+        # create the root window
+        root = self['root'] = Tk()
+        root.wm_title(os.path.basename(sys.argv[0]))
+        image = PhotoImage(file="vssh_logo.gif")
+        root.tk.call("wm", "iconphoto", root._w, image)
+
+        self['var'] = StringVar()
+        self['var'].set(self.guests[0])
+
+        # create the content pages
+        container = Frame(root)
+        container.pack(fill=BOTH)
+        init_frame = self.initial_frame(container)
+        next_frame, self['info_title'] = self.info_frame(container)
+        confirm_frame = self.confirm_frame(container)
+
+        # update the navigation values
+        self['current'] = init_frame
+        self['pages'].append(init_frame)
+        self['pages'].append(next_frame)
+        self['pages'].append(confirm_frame)
+
+        # create the window footer
+        footer = Frame(root)
+        footer.grid_columnconfigure(0, weight=1)
+        footer.grid_rowconfigure(0, weight=1)
+
+        # make the content and the footer separation obvious
+        Separator(footer, orient=HORIZONTAL).grid(row=0, columnspan=4,
+                                                  sticky="ew", padx=4, pady=4)
+
+        # create the footer navigation area
+        horizontal = Frame(footer)
+        horizontal.grid(row=1, column=0)
+
+        # create previous arrow
+        prev_image = PhotoImage(file="previous_arrow.png")
+        self['prev'] = Button(horizontal, image=prev_image, text="Previous",
+                              command=self.prev, state=DISABLED)
+        self['prev'].grid(column=0, row=1, padx=2)
+        self['prev'].img = prev_image
+
+        # create confirmation button
+        self['confirmed'] = Button(horizontal, text="Confirm", state=DISABLED,
+                                   command=self.confirm)
+        self['confirmed'].grid(column=1, row=1, padx=2)
+
+        # create cancel button
+        self['cancel'] = Button(horizontal, text="Cancel", state=NORMAL,
+                                command=self.exit)
+        self['cancel'].grid(column=2, row=1, padx=2)
+
+        # create next button
+        next_image = PhotoImage(file="next_arrow.png")
+        self['next'] = Button(horizontal, image=next_image, text='Next',
+                              command=self.next, state=NORMAL)
+        self['next'].grid(column=3, row=1, padx=2)
+        self['next'].img = next_image
+
+        # create the footer feedback area
+        self.footer_message = Label(footer, text="", relief=SUNKEN)
+        self.footer_message.grid(sticky="ew", row=2, column=0, columnspan=4,
+                                 padx=4, pady=4)
+
+        footer.pack(fill=BOTH, side=BOTTOM)
+
+    def initial_frame(self, container):
+        '''Create the initial frame that is shown for the utility.
+        Args:
+            container - the initial frame's parent
+        Returns:
+            the confirmation/initial frame
+        '''
+        init_frame = Frame(container, height=400)
+
+        # create the page title
+        Label(init_frame,
+              text='Please select the guest to configure: ').pack()
+        init_frame.pack()
+
+        vertical = Frame(init_frame)
+        vertical.pack()
+
+        # figure out the host with the maximum width
+        max_host = 0
+        for host in self.guests:
+            max_host = max(len(host), max_host)
+        max_host *= 5
+
+        # create the list of guest buttons
+        self['var'] = StringVar()
+        for host in self.guests:
+            text = "{0:{width}}".format(str(host), width=max_host)
+            Radiobutton(vertical,
+                        text=text,
+                        variable=self['var'],
+                        justify=LEFT,
+                        value=str(host),
+                        command=self.host_selected).pack(anchor=W)
+
+        # make the first guest selected
+        self['var'].set(self.guests[0])
+
+        return init_frame
+
+    def info_frame(self, container):
+        '''Create the information/editor frame that is shown for the utility.
+        Args:
+            container - the information frame's parent
+        Returns:
+            the information/editor frame
+            page title
+        '''
+        info = Frame(container, height=400)
+
+        # get the currently selected host
+        host = self['var'].get()
+
+        # create the page title
+        title = Label(info,
+                      text="Make changes to the {} guest".format(host))
+        title.pack()
+
+        # build the fields for the currently selected guest
+        count = 0
+        grid = Frame(info)
+        for label, value in [("Host:", host),
+                             ("User:", self.csv_dict[host].user),
+                             ("Port:", self.csv_dict[host].port),
+                             ("Other:", self.csv_dict[host].other)]:
+            Label(grid, text=label).grid(row=count, sticky="ew")
+
+            label = label.lower()[:-1]
+            self['info'][label] = Entry(grid)
+            # ensure that the value is valid
+            if value is None:
+                value = ''
+            self['info'][label].insert(0, value)
+            self['info'][label].grid(row=count, column=1)
+
+            count += 1
+
+        self['delete'] = BooleanVar()
+        self['delete'].set(False)
+        Checkbutton(grid, text="Delete from VSSH CSV file",
+                    variable=self['delete']).grid(row=count+1, column=1,
+                                                  pady=2)
+
+        grid.pack()
+
+        return info, title
+
+    def confirm_frame(self, container):
+        '''Create the confirmation frame that is shown for the utility.
+        Args:
+            container - the confirmation frame's parent
+        Returns:
+            the confirmation frame
+        '''
+        confirm_frame = Frame(container, height=400)
+
+        # create the page title
+        Label(confirm_frame,
+              text='Please confirm the changes').pack()
+
+        grid = Frame(confirm_frame)
+        row = 0
+        # create the headers
+        Label(grid, text="").grid(sticky=W, row=row, column=0)
+        Label(grid, text="Old", fg="grey", font="bold").grid(row=row, column=1)
+        Label(grid, text="New", fg="grey", font="bold").grid(row=row, column=2)
+
+        # get the currently selected guest
+        host = self['var'].get()
+
+        # display the guest information both the original and new information
+        for label, old in [('Host', self.csv_dict[host].host),
+                           ('User', self.csv_dict[host].user),
+                           ('Port', self.csv_dict[host].port),
+                           ('Other', self.csv_dict[host].other)]:
+            row += 1
+            Label(grid, text=label,
+                  fg="grey", font="bold").grid(sticky=W, padx=5,
+                                               row=row, column=0)
+            label = label.lower()
+            self['confirm_grid'][label + "-old"] = Label(grid, text=old)
+            self['confirm_grid'][label + "-old"].grid(sticky=W, padx=5,
+                                                      row=row, column=1)
+            value = self['info'][label].get()
+            self['confirm_grid'][label + "-new"] = Label(grid, text=value)
+            self['confirm_grid'][label + "-new"].grid(sticky=W, padx=5,
+                                                      row=row, column=2)
+
+        grid.pack()
+
+        return confirm_frame
+
+    def exit(self):
+        '''exit the utility'''
+        print("Canceling...", file=self.verbose)
+        sys.exit(0)
+
+    def confirm(self):
+        '''the changes have been confirmed'''
+        host = self['var'].get()
+        print("Changes for %s confirmed" % host, file=self.verbose)
+
+        if self['delete'].get():
+            completed = gui_delete_guest(host, self.csv_file, self.verbose)
+        else:
+            del self.csv_dict[host]
+            vssh = VSSH(host, self['info']['user'].get(),
+                        self['info']['port'].get(),
+                        self['info']['other'].get())
+            self.csv_dict[host] = vssh
+            completed = gui_update_guest(host, self.csv_dict, self.csv_file,
+                                         self.verbose)
+
+        if completed is None:
+            print("Changes canceled", file=self.verbose)
+        else:
+            if completed:
+                print("Changes made", file=self.verbose)
+            else:
+                print("No changes made", file=self.verbose)
+            sys.exit(0)
+
+    def move(self, direction, prev=False):
+        '''move to the active screen'''
+        index = self['pages'].index(self['current']) + direction
+
+        # ensure that the index is valid
+        if not 0 <= index < len(self['pages']):
+            return
+
+        # save the current width
+        width = self['root'].winfo_width()
+        height = self['root'].winfo_height()
+
+        # update to the new page
+        self['current'].pack_forget()
+        self['current'] = self['pages'][index]
+        self['current'].pack(side=TOP)
+
+        # ensure that the window size is correct
+        width = max(width, self['root'].winfo_width())
+        height = max(height, self['root'].winfo_height())
+        self['root'].geometry("{}x{}".format(width, height))
+
+        # get the selected host
+        host = self['var'].get()
+
+        # reset the footer text and confirm button
+        self.footer_message['text'] = ""
+        self['confirmed']['state'] = DISABLED
+
+        # reset the delete checkbox if moving backwards
+        if prev:
+            self['delete'].set(False)
+
+        # check if this is the last page
+        if index >= (len(self['pages']) - 1):
+            # no further pages, therefore, disable the next button
+            self['next']['state'] = DISABLED
+
+            # update the page showing what is about to change
+            changes = False
+            for label, old in [('Host', self.csv_dict[host].host),
+                               ('User', self.csv_dict[host].user),
+                               ('Port', self.csv_dict[host].port),
+                               ('Other', self.csv_dict[host].other)]:
+                label = label.lower()
+                self['confirm_grid'][label + "-old"]['text'] = old
+                value = self['info'][label].get()
+                self['confirm_grid'][label + "-new"]['text'] = value
+
+                # remember that something changed
+                if old != value:
+                    changes = True
+
+            if changes:
+                # since something changed the user should be allowed to
+                # make the update
+                self['confirmed']['state'] = NORMAL
+            else:
+                # nothing changed update the footer message
+                print("There are no changes", file=self.verbose)
+                self.footer_message['text'] = "There are no changes present"
+
+            # was the delete checkbox selected
+            if self['delete'].get():
+                # the user wants to delete the guest
+                print("Guest (%s) marked for deletion" % host,
+                      file=self.verbose)
+                # since deleting the user should be allowe to make the update
+                self['confirmed']['state'] = NORMAL
+                # update the footer message about deleting the guest
+                self.footer_message['text'] = \
+                    "Guest (%s) marked for deletion" % host
+        else:
+            # there are more pages to follow
+            self['next']['state'] = NORMAL
+
+        if index <= 0:
+            # this is the first page, therefore, disable the previous button
+            self['prev']['state'] = DISABLED
+        else:
+            # there are pages before this one, therefore, the user should be
+            # allowed to go to the previous page
+            self['prev']['state'] = NORMAL
+
+    def next(self):
+        '''go to the next screen'''
+        self.move(+1)
+
+    def prev(self):
+        '''go to the previous screen'''
+        self.move(-1, prev=True)
+
+    def host_selected(self):
+        '''radio button selected, therefore, update the GUI'''
+        # get the currently selected guest
+        host = self['var'].get()
+
+        # update the information/editor page
+        self['info_title']['text'] = \
+            "Make changes to the {} guest".format(host)
+
+        for label, value in [('host', host),
+                             ('user', self.csv_dict[host].user),
+                             ('port', self.csv_dict[host].port),
+                             ('other', self.csv_dict[host].other)]:
+            # ensure that the value valid
+            if value is None:
+                value = ''
+
+            # set the Entry value for label
+            self['info'][label].delete(0, END)
+            self['info'][label].insert(0, value)
+
+
+def write_csv(csv_file, csv_dict):
+    '''output the csv file
+    Args:
+        csv_file - csv file name
+        csv_dict - the csv dictionary containing the information to write
+    '''
+    with open(csv_file, "w") as fobj:
+        csv_writer = csv.writer(fobj)
+        for host in csv_dict:
+            csv_writer.writerow([csv_dict[host].host, csv_dict[host].user,
+                                 csv_dict[host].port, csv_dict[host].other])
+
+
+def gui_update_guest(host, csv_dict, csv_file, verbose):
+    '''update the guest in the VSSH CSV file and VBoxManage information
+    Args:
+        host - host to update
+        csv_dict - the csv dictionary containing the guest information
+        csv_file - csv file name
+        verbose - verbose output file handle
+    Returns:
+        None if canceled
+        True if deleted
+        False if not deleted
+    '''
+    updated = askyesnocancel("Update", "Update %s guest?" % host)
+    if updated:
+        print("Updating %s..." % host, file=verbose)
+        orig_dict = get_vssh(csv_file, None, verbose, only_vssh=True)
+        # replace the original information with the new information
+        orig_dict[host] = csv_dict[host]
+        write_csv(csv_file, orig_dict)
+        # TODO add VBoxManage code
+    elif updated is None:
+        print("Operation canceled.", file=verbose)
+    else:
+        print("Not updating %s..." % host, file=verbose)
+
+    return updated
+
+
+def gui_delete_guest(host, csv_file, verbose):
+    '''delete the guest from the VSSH CSV file
+    Args:
+        host - host to be deleted
+        csv_file - csv file name
+        verbose - verbose output file handle
+    Returns:
+        None if canceled
+        True if deleted
+        False if not deleted
+    '''
+    csv_dict = get_vssh(csv_file, None, verbose, only_vssh=True)
+    delete = None
+    if host in csv_dict:
+        delete = askyesnocancel("Delete", "Delete %s guest?" % host)
+        print("Delete: %s" % str(delete))
+        if delete:
+            print("Deleting %s..." % host, file=verbose)
+            del csv_dict[host]
+            write_csv(csv_file, csv_dict)
+        elif delete is None:
+            print("Operation canceled.", file=verbose)
+        else:
+            print("Not deleting %s..." % host, file=verbose)
+    else:
+        # guest only known to VBox and not in the VSSH CSV file
+        showinfo("Info", "Host (%s) not part of the VSSH CSV file" % host)
+        print("Host (%s) not part of the VSSH CSV file" % host, file=verbose)
+        delete = False
+
+    return delete
+
+
+def parse_arguments():
+    '''Parse the command line arguments'''
+    # parse the command line arguments
+    parser = argparse.ArgumentParser(description="vssh configuration "
+                                                 "utility")
+    parser.add_argument("-v", "--verbose", help="make the output verbose",
+                        action="store_true")
+    parser.add_argument("-c", "--csv_file", help="CSV file")
+
+    args = parser.parse_args()
+
+    # validate command line arguments
+    # ensure required arguments provided
+    if None in [args.csv_file]:
+        if args.csv_file is None:
+            print("Error:CSV file is required")
+        parser.print_help()
+        sys.exit(1)
+
+    # ensure that the csv file exists
+    csv_file = args.csv_file
+    if not os.path.exists(csv_file):
+        print("Error: File (%s) not found" % csv_file)
+        sys.exit(1)
+
+    # ensure that the command output is handled correctly according
+    # to the verbose option
+    verbose = open("/dev/null", "w")
+    if args.verbose:
+        verbose.close()
+        verbose = sys.stdout
+
+    return csv_file, verbose
+
+
+def get_guests(verbose):
+    '''retrieve the available VBox guests
+    Returns:
+        list of VBox guest
+    '''
+    # get the list of available guests
+    proc = Popen([VBOXMG, "list", "vms"], stdout=PIPE)
+    output = proc.communicate()[0]
+
+    host_list = []
+    # parse the guest list output
+    for vminfo in output.decode().split("\n"):
+        if vminfo:
+            # save the guest name found
+            host, dummy = vminfo.split(" ")
+            host_list.append(host.strip('"'))
+
+    host_list.sort()
+
+    # output the guests found when verbose is turned on
+    print("Guests discovered:", ", ".join(host_list), file=verbose)
+
+    return host_list
+
+
+def get_vssh(csv_file, guests, verbose, only_vssh=False):
+    '''retrieve the vssh csv hosts
+    Returns:
+        VSSH dictionary with the host as the key
+    '''
+    csv_dict = dict()
+    # read the vssh CSV file
+    with open(csv_file, "r") as fobj:
+        csv_reader = csv.reader(fobj)
+        for line in csv_reader:
+            last = ""
+            if len(line) > 3:
+                last = line[3]
+            csv_dict[line[0]] = VSSH(line[0], line[1], line[2], last)
+
+    if not only_vssh:
+        # add in any guests that are listed but not in the CSV file
+        for guest in guests:
+            if guest not in csv_dict:
+                csv_dict[guest] = VSSH(guest, "", "", "")
+
+    # output the VSSH information when verbose is turned on
+    print("VSSH information:", file=verbose)
+    for vssh in csv_dict:
+        print("\t{} {} {} {}".format(csv_dict[vssh].host,
+                                     csv_dict[vssh].user,
+                                     csv_dict[vssh].port,
+                                     csv_dict[vssh].other), file=verbose)
+
+    return csv_dict
+
+
+def main():
+    '''main function for the utility'''
+    csv_file, verbose = parse_arguments()
+
+    guests = get_guests(verbose)
+
+    dummy = Wizard(guests, csv_file, verbose)
+
+    mainloop()
+
+
+if __name__ == "__main__":
+    main()
